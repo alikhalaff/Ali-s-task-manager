@@ -21,7 +21,7 @@ jobs:
       - run: npm run "test:$LOAD_MODE"
         env:
           LOAD_MODE: ${{ inputs.mode }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: stress-results
