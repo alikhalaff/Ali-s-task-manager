@@ -1,0 +1,57 @@
+# Always combine with docker-compose.yml under the taskflow-stress project.
+# Requires Compose 2.24.4+ for !override. The demo instance is untouched.
+services:
+  db:
+    environment:
+      MYSQL_ROOT_PASSWORD: isolated-stress-root-password
+      MYSQL_DATABASE: taskmanager_stress
+      MYSQL_USER: stressuser
+      MYSQL_PASSWORD: isolated-stress-password
+    ports: !override []
+    volumes: !override []
+    tmpfs:
+      - /var/lib/mysql
+
+  migrate:
+    environment: &stress-environment
+      NODE_ENV: production
+      DATABASE_URL: mysql://stressuser:isolated-stress-password@db:3306/taskmanager_stress
+      SESSION_SECRET: isolated-stress-session-secret-at-least-32-characters
+      PUBLIC_ORIGIN: http://localhost:8082
+      COOKIE_SECURE: 'false'
+      SEED_DEMO: 'true'
+      API_RATE_LIMIT: ${STRESS_API_RATE_LIMIT:-1000000}
+      AUTH_RATE_LIMIT: ${STRESS_AUTH_RATE_LIMIT:-1000}
+
+  api:
+    environment: *stress-environment
+
+  web:
+    ports: !override
+      - '127.0.0.1:8082:80'
+
+  stress-seed:
+    profiles: ['stress']
+    build:
+      context: ./backend
+      target: build
+    environment: *stress-environment
+    command: ['npm', 'run', 'stress:seed']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  k6:
+    profiles: ['stress']
+    image: grafana/k6:1.7.1
+    user: '0:0'
+    environment:
+      BASE_URL: http://web
+      LOAD_MODE: ${LOAD_MODE:-stress}
+    volumes:
+      - ./tests/load:/scripts:ro
+      - ./artifacts/stress:/results
+    command: ['run', '--quiet', '/scripts/tasks.js']
+    depends_on:
+      web:
+        condition: service_healthy

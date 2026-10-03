@@ -1,0 +1,30 @@
+name: Isolated performance test
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Load profile
+        type: choice
+        default: smoke
+        options: [smoke, load, stress]
+permissions:
+  contents: read
+jobs:
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm run "test:$LOAD_MODE"
+        env:
+          LOAD_MODE: ${{ inputs.mode }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stress-results
+          path: artifacts/stress
+      - run: npm run stress:down
+        if: always()

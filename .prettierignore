@@ -1,0 +1,10 @@
+node_modules
+dist
+backend/src/generated
+playwright-report
+test-results
+artifacts
+.env
+.env.*
+*.sql
+*.toml

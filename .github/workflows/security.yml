@@ -1,0 +1,42 @@
+name: Container vulnerability review
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * 1'
+permissions:
+  contents: read
+jobs:
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: docker compose --project-name security-review build --pull --no-cache api web db
+      - name: Scan runtime images
+        run: |
+          mkdir -p artifacts/security
+          scan_failed=0
+          for service_name in api web mysql; do
+            case "$service_name" in
+              api) image_name=security-review-api ;;
+              web) image_name=security-review-web ;;
+              mysql) image_name=task-manager-mysql:8.4 ;;
+            esac
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock:ro \
+              -v "$PWD/artifacts/security:/reports" \
+              -v trivy-cache:/root/.cache/trivy \
+              aquasec/trivy:0.75.0 image \
+              --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 \
+              --format json --output "/reports/$service_name.json" "$image_name" || scan_failed=1
+          done
+          exit "$scan_failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: container-security-reports
+          path: artifacts/security

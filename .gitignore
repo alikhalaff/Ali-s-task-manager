@@ -9,6 +9,13 @@ node_modules/
 # Build output
 dist/
 .quasar/
+backend/src/generated/
+playwright-report/
+test-results/
+artifacts/
+backend/frontend/
+__pycache__/
+*.zip
 
 # Logs and OS/editor files
 *.log

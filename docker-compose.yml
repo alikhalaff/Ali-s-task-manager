@@ -1,26 +1,124 @@
+x-api-environment: &api-environment
+  NODE_ENV: production
+  MYSQL_HOST: db
+  MYSQL_USER: ${MYSQL_USER:-taskuser}
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change_me_user}
+  MYSQL_DATABASE: ${MYSQL_DATABASE:-taskmanager}
+  SESSION_SECRET: ${SESSION_SECRET:-local-development-secret-change-me-at-least-32-characters}
+  PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  SEED_DEMO: ${SEED_DEMO:-true}
+  API_RATE_LIMIT: ${API_RATE_LIMIT:-300}
+  AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-20}
+
 services:
   db:
-    image: mysql:8.0
-    container_name: taskmanager-db
+    image: task-manager-mysql:8.4
+    build: ./database
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change_me_root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-taskmanager}
+      MYSQL_USER: ${MYSQL_USER:-taskuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change_me_user}
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      - '127.0.0.1:${MYSQL_PORT:-3306}:3306'
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      test:
+        [
+          'CMD-SHELL',
+          'mysql --protocol=tcp -h 127.0.0.1 -u"$$MYSQL_USER" -p"$$MYSQL_PASSWORD" "$$MYSQL_DATABASE" -e ''SELECT 1'' >/dev/null 2>&1',
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 20s
 
+  migrate:
+    build:
+      context: ./backend
+      target: build
+    environment: *api-environment
+    command: ['npm', 'run', 'db:deploy']
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build:
+      context: ./backend
+      target: runtime
+    environment: *api-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  web:
+    build: ./frontend
+    ports:
+      - '${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8080}:80'
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db-test:
+    image: task-manager-mysql:8.4
+    build: ./database
+    profiles: ['test']
+    environment:
+      MYSQL_ROOT_PASSWORD: test-root-password
+      MYSQL_DATABASE: taskmanager_test
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpassword
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "mysql --protocol=tcp -h 127.0.0.1 -utestuser -ptestpassword taskmanager_test -e 'SELECT 1' >/dev/null 2>&1",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  api-test:
+    profiles: ['test']
+    build:
+      context: ./backend
+      target: test
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: mysql://testuser:testpassword@db-test:3306/taskmanager_test
+      SESSION_SECRET: isolated-test-session-secret-at-least-32-characters
+      PUBLIC_ORIGIN: http://localhost:8080
+      SEED_DEMO: 'false'
+    depends_on:
+      db-test:
+        condition: service_healthy
+
 volumes:
   db_data:
+    name: ${MYSQL_VOLUME_NAME:-${COMPOSE_PROJECT_NAME}_db_data}
