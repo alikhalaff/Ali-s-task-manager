@@ -1,4 +1,4 @@
-FROM golang:1.27.1-alpine AS gosu-build
+FROM golang:1.27.2-alpine AS gosu-build
 WORKDIR /build
 # Keep the official privilege-switch helper, rebuilding its vulnerable Go dependencies.
 RUN go mod init taskflow-gosu-build \
